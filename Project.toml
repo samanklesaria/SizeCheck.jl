@@ -1,0 +1,12 @@
+name = "SizeCheck"
+uuid = "e0176837-3861-45f9-8fb4-a12fc39b9661"
+authors = ["Sam Anklesaria <anklesarian@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+
+[compat]
+MLStyle = "0.4.17"
+Revise = "3.9.0"
