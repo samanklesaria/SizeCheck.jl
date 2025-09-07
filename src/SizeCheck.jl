@@ -30,87 +30,73 @@ macro sizecheck(expr)
 end
 
 function transform_function_body(signature, body)
-    # Create the _dims_ dictionary declaration
-    dims_decl = :(local _dims_ = Dict{Char, Tuple{Int, Symbol}}())
+    # Track dimensions at compile time for error messages
+    dim_tracking = Dict{Char,Symbol}()
 
     # Extract function arguments and generate checks for them
-    arg_checks = generate_argument_checks(signature)
+    arg_checks = generate_argument_checks(signature, dim_tracking)
 
     # Transform the function body
-    transformed_body = transform_ast(body)
+    transformed_body = transform_ast(body, dim_tracking)
 
-    # Insert the _dims_ declaration and argument checks at the beginning
+    # Insert argument checks at the beginning
     @match transformed_body begin
-        Expr(:block, stmts...) => Expr(:block, dims_decl, arg_checks..., stmts...)
-        _ => Expr(:block, dims_decl, arg_checks..., transformed_body)
+        Expr(:block, stmts...) => Expr(:block, arg_checks..., stmts...)
+        _ => Expr(:block, arg_checks..., transformed_body)
     end
 end
 
-function transform_ast(expr)
+function transform_ast(expr, dim_tracking)
     @match expr begin
         # Handle regular assignment expressions
-        Expr(:(=), lhs, rhs) => transform_assignment(lhs, rhs)
+        Expr(:(=), lhs, rhs) => transform_assignment(lhs, rhs, dim_tracking)
 
         # Handle augmented assignments
         Expr(op, lhs, rhs) => begin
             if op in [:+=, :-=, :*=, :/=, :%=, :^=]
-                transform_augmented_assignment(op, lhs, rhs)
+                transform_augmented_assignment(op, lhs, rhs, dim_tracking)
             else
-                Expr(op, map(transform_ast, [lhs, rhs])...)
+                Expr(op, map(e -> transform_ast(e, dim_tracking), [lhs, rhs])...)
             end
         end
 
         # Handle block expressions recursively
-        Expr(:block, stmts...) => Expr(:block, map(transform_ast, stmts)...)
+        Expr(:block, stmts...) => Expr(:block, map(e -> transform_ast(e, dim_tracking), stmts)...)
 
         # Handle other expressions recursively
-        Expr(head, args...) => Expr(head, map(transform_ast, args)...)
+        Expr(head, args...) => Expr(head, map(e -> transform_ast(e, dim_tracking), args)...)
 
         # Leave literals and symbols unchanged
         _ => expr
     end
 end
 
-function transform_assignment(lhs, rhs)
+function transform_assignment(lhs, rhs, dim_tracking)
     # Check if lhs has size annotation
-    if has_size_annotation(lhs)
-        var_name, dims = parse_size_annotation(lhs)
-        check_expr = generate_size_check(var_name, dims)
+    annotation = parse_size_annotation(lhs)
+    if annotation !== nothing
+        var_name, dims = annotation
+        check_expr = generate_size_check(var_name, dims, dim_tracking)
         return Expr(:block,
-            Expr(:(=), lhs, transform_ast(rhs)),
+            Expr(:(=), lhs, transform_ast(rhs, dim_tracking)),
             check_expr
         )
     else
-        return Expr(:(=), lhs, transform_ast(rhs))
+        return Expr(:(=), lhs, transform_ast(rhs, dim_tracking))
     end
 end
 
-function transform_augmented_assignment(op, lhs, rhs)
-    if has_size_annotation(lhs)
-        var_name, dims = parse_size_annotation(lhs)
-        check_expr = generate_size_check(var_name, dims)
+function transform_augmented_assignment(op, lhs, rhs, dim_tracking)
+    annotation = parse_size_annotation(lhs)
+    if annotation !== nothing
+        var_name, dims = annotation
+        check_expr = generate_size_check(var_name, dims, dim_tracking)
         return Expr(:block,
-            Expr(op, lhs, transform_ast(rhs)),
+            Expr(op, lhs, transform_ast(rhs, dim_tracking)),
             check_expr
         )
     else
-        return Expr(op, lhs, transform_ast(rhs))
-    end
-end
-
-function has_size_annotation(expr)
-    @match expr begin
-        s::Symbol => begin
-            str_s = string(s)
-            parts = split(str_s, '_')
-            if length(parts) >= 2
-                dims_part = last(parts)
-                all(c -> isuppercase(c), dims_part) && !isempty(dims_part)
-            else
-                false
-            end
-        end
-        _ => false
+        return Expr(op, lhs, transform_ast(rhs, dim_tracking))
     end
 end
 
@@ -119,44 +105,57 @@ function parse_size_annotation(expr)
         s::Symbol => begin
             str_s = string(s)
             parts = split(str_s, '_')
-            var_name = s
-            dims = collect(last(parts))
-            (var_name, dims)
+            if length(parts) >= 2
+                dims_part = last(parts)
+                if all(c -> isuppercase(c), dims_part) && !isempty(dims_part)
+                    var_name = s
+                    dims = collect(dims_part)
+                    return (var_name, dims)
+                end
+            end
+            return nothing
         end
-        _ => error("Invalid size annotation")
+        _ => nothing
     end
 end
 
-function generate_size_check(var_name, dims)
+function generate_size_check(var_name, dims, dim_tracking)
     checks = []
 
     for (i, dim) in enumerate(dims)
-        dim_check = quote
-            let current_size = size($var_name, $i)
-                if haskey(_dims_, $(QuoteNode(dim)))
-                    stored_size, stored_var = _dims_[$(QuoteNode(dim))]
-                    if stored_size != current_size
-                        error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but variable $stored_var has size $stored_size")
+        dim_var = Symbol(dim)
+
+        if haskey(dim_tracking, dim)
+            # Dimension already seen, generate comparison check using existing variable
+            first_var = dim_tracking[dim]
+            dim_check = quote
+                let current_size = size($var_name, $i)
+                    if $dim_var != current_size
+                        error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but variable $($(QuoteNode(first_var))) has size $($dim_var)")
                     end
-                else
-                    _dims_[$(QuoteNode(dim))] = (current_size, $(QuoteNode(var_name)))
                 end
             end
+        else
+            # First time seeing this dimension, create the variable
+            dim_tracking[dim] = var_name
+            dim_check = :($dim_var = size($var_name, $i))
         end
+
         push!(checks, dim_check)
     end
 
     Expr(:block, checks...)
 end
 
-function generate_argument_checks(signature)
+function generate_argument_checks(signature, dim_tracking)
     args = extract_function_args(signature)
     checks = []
 
     for arg in args
-        if has_size_annotation(arg)
-            var_name, dims = parse_size_annotation(arg)
-            check_expr = generate_size_check(var_name, dims)
+        annotation = parse_size_annotation(arg)
+        if annotation !== nothing
+            var_name, dims = annotation
+            check_expr = generate_size_check(var_name, dims, dim_tracking)
             push!(checks, check_expr)
         end
     end
