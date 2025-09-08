@@ -83,21 +83,47 @@ function transform_ast(expr, dim_tracking)
 end
 
 function transform_assignment(lhs, rhs, dim_tracking)
-    # Check if lhs has size annotation
-    annotation = parse_size_annotation(lhs)
-    if annotation !== nothing
-        var_name, dims = annotation
-        check_expr = generate_size_check(var_name, dims, dim_tracking)
-        return Expr(:block,
-            Expr(:(=), lhs, transform_ast(rhs, dim_tracking)),
-            check_expr
-        )
+    # Handle destructuring assignment (tuple on left side)
+    if isa(lhs, Expr) && lhs.head == :tuple
+        # Extract size-annotated variables from tuple
+        annotated_vars = []
+        for var in lhs.args
+            annotation = parse_size_annotation(var)
+            if annotation !== nothing
+                push!(annotated_vars, annotation)
+            end
+        end
+
+        if !isempty(annotated_vars)
+            # Generate the assignment and checks
+            assignment = Expr(:(=), lhs, transform_ast(rhs, dim_tracking))
+            checks = []
+            for (var_name, dims) in annotated_vars
+                check_expr = generate_size_check(var_name, dims, dim_tracking)
+                push!(checks, check_expr)
+            end
+            return Expr(:block, assignment, checks...)
+        else
+            return Expr(:(=), lhs, transform_ast(rhs, dim_tracking))
+        end
     else
-        return Expr(:(=), lhs, transform_ast(rhs, dim_tracking))
+        # Handle single variable assignment
+        annotation = parse_size_annotation(lhs)
+        if annotation !== nothing
+            var_name, dims = annotation
+            check_expr = generate_size_check(var_name, dims, dim_tracking)
+            return Expr(:block,
+                Expr(:(=), lhs, transform_ast(rhs, dim_tracking)),
+                check_expr
+            )
+        else
+            return Expr(:(=), lhs, transform_ast(rhs, dim_tracking))
+        end
     end
 end
 
 function transform_augmented_assignment(op, lhs, rhs, dim_tracking)
+    # Note: augmented assignment doesn't support destructuring in Julia
     annotation = parse_size_annotation(lhs)
     if annotation !== nothing
         var_name, dims = annotation

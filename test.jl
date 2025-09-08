@@ -162,3 +162,97 @@ end
     @test contains(expansion_str, "current_size != 3")  # Constant check
     @test contains(expansion_str, "current_size != 2")  # Constant check
 end
+
+@testset "Destructuring Assignment" begin
+    # Helper function that returns multiple arrays
+    function get_arrays(n, k, m)
+        return rand(n, k), rand(k, m), rand(n, m)
+    end
+
+    # Test simple destructuring with one size-annotated variable
+    @sizecheck function test_simple_destructuring()
+        arrays = get_arrays(3, 4, 5)
+        result_NK, status = arrays[1], "success"
+        return result_NK, status, N, K
+    end
+
+    result, status, n, k = test_simple_destructuring()
+    @test n == 3
+    @test k == 4
+    @test status == "success"
+    @test size(result) == (3, 4)
+
+    # Test multiple size-annotated variables in destructuring
+    @sizecheck function test_multiple_destructuring()
+        a_NK, b_KM, c_NM = get_arrays(4, 3, 5)
+        return a_NK, b_KM, c_NM, N, K, M
+    end
+
+    a, b, c, n, k, m = test_multiple_destructuring()
+    @test n == 4
+    @test k == 3
+    @test m == 5
+    @test size(a) == (4, 3)
+    @test size(b) == (3, 5)
+    @test size(c) == (4, 5)
+
+    # Test mixed size-annotated and regular variables in destructuring
+    @sizecheck function test_mixed_destructuring()
+        matrix_NK, scalar, vector_N = rand(2, 3), 42, rand(2)
+        return matrix_NK, scalar, vector_N, N, K
+    end
+
+    matrix, scalar, vector, n, k = test_mixed_destructuring()
+    @test n == 2
+    @test k == 3
+    @test scalar == 42
+    @test size(matrix) == (2, 3)
+    @test size(vector) == (2,)
+
+    # Test destructuring with numerical constants
+    @sizecheck function test_destructuring_constants()
+        a_N3, b_3K = rand(4, 3), rand(3, 5)
+        return a_N3, b_3K, N, K
+    end
+
+    a, b, n, k = test_destructuring_constants()
+    @test n == 4
+    @test k == 5
+    @test size(a) == (4, 3)
+    @test size(b) == (3, 5)
+
+    # Test error case: dimension mismatch in destructuring
+    @sizecheck function test_destructuring_error()
+        # This should fail because both variables claim K but have different sizes
+        a_NK, b_KM = rand(3, 4), rand(5, 6)  # K=4 vs K=5 mismatch
+        return a_NK, b_KM, N, K, M
+    end
+
+    @test_throws "Dimension K mismatch" test_destructuring_error()
+
+    # Test destructuring with shared dimensions validates correctly
+    @sizecheck function test_destructuring_shared_dims()
+        # These should work - N and K are consistent
+        a_NK, b_NM, c_KM = rand(3, 4), rand(3, 5), rand(4, 5)
+        temp = a_NK * c_KM  # Should be 3×5
+        return temp, N, K, M
+    end
+
+    result, n, k, m = test_destructuring_shared_dims()
+    @test n == 3
+    @test k == 4
+    @test m == 5
+    @test size(result) == (3, 5)
+
+    # Test macro expansion includes destructuring checks
+    expansion = @macroexpand @sizecheck function test_expansion_destructuring()
+        a_NK, b_KM = rand(2, 3), rand(3, 4)
+        return a_NK, b_KM, N, K, M
+    end
+
+    expansion_str = string(expansion)
+    @test contains(expansion_str, "N = size(a_NK, 1)")
+    @test contains(expansion_str, "K = size(a_NK, 2)")
+    @test contains(expansion_str, "M = size(b_KM, 2)")
+    @test !contains(expansion_str, "_dims_")
+end
