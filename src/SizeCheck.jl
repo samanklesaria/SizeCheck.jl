@@ -30,6 +30,7 @@ Examples:
     return result_NM, N, K, M  # Dimension variables accessible
 end
 
+# This works fine
 a_NK = randn(3, 4)  # N=3, K=4
 b_KM = randn(4, 5)  # K=4, M=5
 result = matrix_multiply(a_NK, b_KM)  # size: (3, 5)
