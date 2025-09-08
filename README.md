@@ -1,6 +1,6 @@
 # SizeCheck: Runtime Shape Validation for Size-Annotated Julia Code
 
-This library provides `sizecheck`, a macro that automatically adds runtime shape checking to Julia functions based on size-annotated variable names.
+This library provides `sizecheck`, a macro that automatically adds runtime shape checking to Julia functions based on size-annotated variable names. [![][docs-stable-img]][docs-stable-url] [![][docs-dev-img]][docs-dev-url]
 
 ## Overview
 
@@ -52,3 +52,9 @@ The macro automatically adds shape validation for:
 ## Dimension Scope
 
 The dimensions are scoped to the function they are defined in. For example, if you define a function `foo` with a parameter `x_NK`, the dimension `N` is only valid within the scope of `foo`. If you define another function `bar` with a parameter `y_NL`, this dimension `N` can differ from the one in `foo`, but it is only valid within the scope of `bar`.
+
+[docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg
+[docs-stable-url]: https://samanklesaria.github.io/SizeCheck.jl/stable
+
+[docs-dev-img]: https://img.shields.io/badge/docs-dev-blue.svg
+[docs-dev-url]: https://samanklesaria.github.io/SizeCheck.jl/dev
