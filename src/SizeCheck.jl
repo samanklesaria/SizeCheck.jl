@@ -5,15 +5,23 @@ using MLStyle
 export @sizecheck
 
 """
-    @sizecheck function_definition
-
 Automatically adds runtime shape checking to Julia functions based on
 size-annotated variable names. Variables with underscores followed by dimension
 letters (e.g., `x_NK`) are validated to ensure consistent shapes.
 
 Dimension annotations can contain:
-- Variable dimensions (uppercase letters): `N`, `K`, `M` - stored in variables
+- Variable dimensions (uppercase letters): `N`, `K`, `M` - stored in variables of the same name
 - Constant dimensions (single digits): `3`, `4`, `2` - checked for exact size
+
+The macro automatically adds shape validation for:
+1. **Function arguments** with underscores in their names
+2. **Variable assignments** to names containing underscores, including destructuring assignments
+3. **Augmented assignments** (+=, -=, *=, etc.)
+
+The dimensions are scoped to the function they are defined in.
+For example, if you define a function `foo` with a parameter `x_NK`, the dimension `N` is only valid within the scope of `foo`.
+If you define another function `bar` with a parameter `y_NL`, this dimension `N` can differ from the one in `foo`,
+but it is only valid within the scope of `bar`.
 
 Examples:
 ```julia
@@ -21,6 +29,15 @@ Examples:
     result_NM = a_NK * b_KM
     return result_NM, N, K, M  # Dimension variables accessible
 end
+
+a_NK = randn(3, 4)  # N=3, K=4
+b_KM = randn(4, 5)  # K=4, M=5
+result = matrix_multiply(a_NK, b_KM)  # size: (3, 5)
+
+# This raises an error
+a_NK = randn(3, 4)
+b_KM = randn(5, 6)  # Wrong! K dimensions don't match
+result = matrix_multiply(a_NK, b_KM)  # Error!
 
 @sizecheck function with_constants(data_N3, weights_3K)
     # data_N3: first dim variable N, second dim exactly 3
