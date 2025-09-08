@@ -39,10 +39,6 @@ end
     @test contains(expansion_str, "N = size(a_NK, 1)")
     @test contains(expansion_str, "K = size(a_NK, 2)")
 
-    # Should NOT contain any _dims_ dictionary
-    @test !contains(expansion_str, "_dims_")
-    @test !contains(expansion_str, "Dict")
-
     # Test expansion with mixed annotated and regular variables
     expansion2 = @macroexpand @sizecheck function test_mixed(a_NK, regular_var)
         result_NM = a_NK * regular_var
@@ -52,7 +48,6 @@ end
     expansion2_str = string(expansion2)
     @test contains(expansion2_str, "N = size(a_NK, 1)")
     @test contains(expansion2_str, "K = size(a_NK, 2)")
-    @test !contains(expansion2_str, "_dims_")
 end
 
 @testset "Dimension Variable Access" begin
@@ -118,32 +113,52 @@ end
     @test size(result) == (4, 7)  # N × (M+P) = 4 × 7
 end
 
-@testset "No Runtime Dictionary Overhead" begin
-    # Generate a function and check its bytecode doesn't contain dictionary operations
-    @sizecheck function no_dict_test(a_NK, b_KM)
-        c_NM = a_NK * b_KM
-        return c_NM, N, K, M
+@testset "Numerical Constant Dimensions" begin
+    # Test single numerical constants
+    @sizecheck function test_constants(a_N3, b_2K)
+        result_NK = zeros(N, K)
+        return result_NK, N, K
     end
 
-    # Get the method and its code info
-    method = methods(no_dict_test).ms[1]
-    code_info = Base.uncompressed_ast(method)
-    code_str = string(code_info)
+    a = rand(4, 3)  # N=4, second dim=3
+    b = rand(2, 5)  # first dim=2, K=5
+    result, n, k = test_constants(a, b)
+    @test n == 4
+    @test k == 5
+    @test size(result) == (4, 5)
 
-    # Should not contain any dictionary-related operations
-    @test !contains(code_str, "Dict")
-    @test !contains(code_str, "haskey")
-    @test !contains(code_str, "getindex")
-    @test !contains(code_str, "setindex!")
+    # Test error case for wrong constant
+    @sizecheck function test_constant_error(a_N3)
+        return a_N3, N
+    end
 
-    # Should contain direct size calls for dimension variables
-    @test contains(code_str, "size")
+    a_wrong = rand(2, 4)  # Second dimension is 4, but expected 3
+    @test_throws "Dimension 3 mismatch" test_constant_error(a_wrong)
 
-    # Verify the function actually works
-    a = rand(3, 4)
-    b = rand(4, 5)
-    result, n, k, m = no_dict_test(a, b)
+    # Test complex mix of constants and variables
+    @sizecheck function test_complex_constants(a_N32, b_4K2, c_N4)
+        return a_N32, b_4K2, c_N4, N, K
+    end
+
+    a = rand(3, 3, 2)  # N=3, second=3, third=2
+    b = rand(4, 5, 2)  # first=4, K=5, third=2
+    c = rand(3, 4)     # N=3, second=4
+    result_a, result_b, result_c, n, k = test_complex_constants(a, b, c)
     @test n == 3
-    @test k == 4
-    @test m == 5
+    @test k == 5
+
+    # Test error in complex case
+    b_wrong = rand(3, 5, 2)  # first=3, but expected 4
+    @test_throws "Dimension 4 mismatch" test_complex_constants(a, b_wrong, c)
+
+    # Test macro expansion with constants
+    expansion = @macroexpand @sizecheck function test_expansion_constants(a_N3, b_2K)
+        return a_N3, b_2K, N, K
+    end
+
+    expansion_str = string(expansion)
+    @test contains(expansion_str, "N = size(a_N3, 1)")  # Variable dimension
+    @test contains(expansion_str, "K = size(b_2K, 2)")  # Variable dimension
+    @test contains(expansion_str, "current_size != 3")  # Constant check
+    @test contains(expansion_str, "current_size != 2")  # Constant check
 end

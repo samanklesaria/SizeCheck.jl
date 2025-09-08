@@ -11,11 +11,22 @@ Automatically adds runtime shape checking to Julia functions based on
 size-annotated variable names. Variables with underscores followed by dimension
 letters (e.g., `x_NK`) are validated to ensure consistent shapes.
 
-Example:
+Dimension annotations can contain:
+- Variable dimensions (uppercase letters): `N`, `K`, `M` - stored in variables
+- Constant dimensions (single digits): `3`, `4`, `2` - checked for exact size
+
+Examples:
 ```julia
 @sizecheck function matrix_multiply(a_NK, b_KM)
     result_NM = a_NK * b_KM
-    return result_NM
+    return result_NM, N, K, M  # Dimension variables accessible
+end
+
+@sizecheck function with_constants(data_N3, weights_3K)
+    # data_N3: first dim variable N, second dim exactly 3
+    # weights_3K: first dim exactly 3, second dim variable K
+    result_NK = data_N3 * weights_3K
+    return result_NK, N, K
 end
 ```
 """
@@ -107,7 +118,7 @@ function parse_size_annotation(expr)
             parts = split(str_s, '_')
             if length(parts) >= 2
                 dims_part = last(parts)
-                if all(c -> isuppercase(c), dims_part) && !isempty(dims_part)
+                if all(c -> isuppercase(c) || isdigit(c), dims_part) && !isempty(dims_part)
                     var_name = s
                     dims = collect(dims_part)
                     return (var_name, dims)
@@ -123,22 +134,35 @@ function generate_size_check(var_name, dims, dim_tracking)
     checks = []
 
     for (i, dim) in enumerate(dims)
-        dim_var = Symbol(dim)
-
-        if haskey(dim_tracking, dim)
-            # Dimension already seen, generate comparison check using existing variable
-            first_var = dim_tracking[dim]
+        if isdigit(dim)
+            # Numerical constant - generate size check
+            expected_size = parse(Int, string(dim))
             dim_check = quote
                 let current_size = size($var_name, $i)
-                    if $dim_var != current_size
-                        error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but variable $($(QuoteNode(first_var))) has size $($dim_var)")
+                    if current_size != $expected_size
+                        error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but expected size $($expected_size)")
                     end
                 end
             end
         else
-            # First time seeing this dimension, create the variable
-            dim_tracking[dim] = var_name
-            dim_check = :($dim_var = size($var_name, $i))
+            # Variable dimension
+            dim_var = Symbol(dim)
+
+            if haskey(dim_tracking, dim)
+                # Dimension already seen, generate comparison check using existing variable
+                first_var = dim_tracking[dim]
+                dim_check = quote
+                    let current_size = size($var_name, $i)
+                        if $dim_var != current_size
+                            error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but variable $($(QuoteNode(first_var))) has size $($dim_var)")
+                        end
+                    end
+                end
+            else
+                # First time seeing this dimension, create the variable
+                dim_tracking[dim] = var_name
+                dim_check = :($dim_var = size($var_name, $i))
+            end
         end
 
         push!(checks, dim_check)
