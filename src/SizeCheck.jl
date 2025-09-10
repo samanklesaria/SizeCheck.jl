@@ -59,7 +59,7 @@ end
 
 function transform_function_body(signature, body)
     # Track dimensions at compile time for error messages
-    dim_tracking = Dict{Char,Symbol}()
+    dim_tracking = Dict{Char,Union{Symbol,Nothing}}()
 
     # Extract function arguments and generate checks for them
     arg_checks = generate_argument_checks(signature, dim_tracking)
@@ -91,6 +91,21 @@ function transform_ast(expr, dim_tracking)
 end
 
 function transform_assignment(lhs, rhs, dim_tracking)
+    # Check for explicit dimension variable assignments
+    if isa(lhs, Symbol)
+        lhs_str = string(lhs)
+        if length(lhs_str) == 1 && isuppercase(lhs_str[1])
+            dim_char = lhs_str[1]
+            if haskey(dim_tracking, dim_char) && dim_tracking[dim_char] !== nothing
+                # Dimension variable already used, throw error
+                error("Cannot assign to dimension variable $lhs after it has been used in a size annotation")
+            elseif !haskey(dim_tracking, dim_char)
+                # Mark this dimension as explicitly assigned
+                dim_tracking[dim_char] = nothing
+            end
+        end
+    end
+
     # Handle destructuring assignment (tuple on left side)
     if isa(lhs, Expr) && lhs.head == :tuple
         # Extract size-annotated variables from tuple
@@ -170,10 +185,22 @@ function generate_size_check(var_name, dims, dim_tracking)
             if haskey(dim_tracking, dim)
                 # Dimension already seen, generate comparison check using existing variable
                 first_var = dim_tracking[dim]
-                dim_check = quote
-                    let current_size = size($var_name, $i)
-                        if $dim_var != current_size
-                            error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but variable $($(QuoteNode(first_var))) has size $($dim_var)")
+                if first_var === nothing
+                    # Explicitly provided dimension
+                    dim_check = quote
+                        let current_size = size($var_name, $i)
+                            if $dim_var != current_size
+                                error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but explicitly provided has size $($dim_var)")
+                            end
+                        end
+                    end
+                else
+                    # Regular dimension tracking
+                    dim_check = quote
+                        let current_size = size($var_name, $i)
+                            if $dim_var != current_size
+                                error("Dimension $($dim) mismatch: variable $($(QuoteNode(var_name))) has size $current_size but variable $($(QuoteNode(first_var))) has size $($dim_var)")
+                            end
                         end
                     end
                 end

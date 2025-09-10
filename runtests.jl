@@ -256,3 +256,97 @@ end
     @test contains(expansion_str, "M = size(b_KM, 2)")
     @test !contains(expansion_str, "_dims_")
 end
+
+@testset "Explicit Dimension Assignment" begin
+
+    # Test 1: Normal dimension tracking (baseline)
+    @sizecheck function normal_dim_test(x_N, y_N)
+        z_N = x_N + y_N
+        return z_N
+    end
+
+    @test_throws "Dimension N mismatch" normal_dim_test(randn(3), randn(4))
+
+    # Test 2: Explicit assignment before use - should work with "explicitly provided" message
+    @sizecheck function explicit_before_test()
+        N = 5
+        x_N = randn(4)  # Size mismatch with N=5
+        return x_N
+    end
+
+    exception = nothing
+    try
+        explicit_before_test()
+    catch e
+        exception = e
+    end
+    @test exception !== nothing
+    @test occursin("explicitly provided", string(exception))
+    @test occursin("Dimension N mismatch", string(exception))
+
+    # Test 3: Explicit assignment after use - should fail during macro expansion
+    macro_error = nothing
+    try
+        @eval @sizecheck function explicit_after_test()
+            x_N = randn(3)
+            N = 5  # This should fail
+            return x_N
+        end
+    catch e
+        macro_error = e
+    end
+    @test macro_error !== nothing
+    @test occursin("Cannot assign to dimension variable N after it has been used", string(macro_error))
+
+    # Test 4: Multiple explicit assignments before use
+    @sizecheck function multiple_explicit_test()
+        N = 3
+        M = 4
+        x_N = randn(N)
+        y_M = randn(M)
+        z_NM = randn(2, 4)  # Mismatch with N=3
+        return z_NM
+    end
+    @test_throws "explicitly provided" multiple_explicit_test()
+
+    # Test 5: Mixed explicit and inferred dimensions
+    @sizecheck function mixed_explicit_test(x_N)
+        M = 4  # Explicit
+        y_M = randn(M)
+        z_NM = randn(N, 3)  # Should fail - M=4 but z_NM has M=3
+        return z_NM
+    end
+    @test_throws "explicitly provided" mixed_explicit_test(randn(2))
+
+
+    # Test 6: Explicit assignment works when sizes match
+    @sizecheck function explicit_match_test()
+        N = 3
+        x_N = randn(3)  # Sizes match
+        return x_N, N
+    end
+
+    result, n = explicit_match_test()
+    @test n == 3
+    @test size(result) == (3,)
+
+    # Test 7: Multiple dimension variables, some explicit, some inferred
+    @sizecheck function mixed_assignment_test(a_NK)
+        M = 5  # Explicit
+        b_KM = randn(K, M)  # K from a_NK, M explicit
+        c_NM = randn(N, 4)  # Should fail - M=5 but c_NM has M=4
+        return c_NM
+    end
+    @test_throws "explicitly provided" mixed_assignment_test(randn(3, 4))
+
+    # Test 8: Ensure normal dimension tracking still works after explicit assignment
+    @sizecheck function normal_after_explicit_test(x_N)
+        M = 4
+        y_M = randn(M)
+        z_N = randn(5)  # Should fail - N from x_N vs N=5
+        return z_N
+    end
+
+    @test_throws (s -> occursin("variable x_N", s) && !occursin("explicitly provided", s)) normal_after_explicit_test(randn(3))
+
+end
