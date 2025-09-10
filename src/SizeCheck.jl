@@ -14,9 +14,8 @@ Dimension annotations can contain:
 - Constant dimensions (single digits): `3`, `4`, `2` - checked for exact size
 
 The macro automatically adds shape validation for:
-1. **Function arguments** with underscores in their names
-2. **Variable assignments** to names containing underscores, including destructuring assignments
-3. **Augmented assignments** (+=, -=, *=, etc.)
+- **Function arguments** with underscores in their names
+- **Variable assignments** to names containing underscores, including destructuring assignments
 
 The dimensions are scoped to the function they are defined in.
 For example, if you define a function `foo` with a parameter `x_NK`, the dimension `N` is only valid within the scope of `foo`.
@@ -80,15 +79,6 @@ function transform_ast(expr, dim_tracking)
         # Handle regular assignment expressions
         Expr(:(=), lhs, rhs) => transform_assignment(lhs, rhs, dim_tracking)
 
-        # Handle augmented assignments
-        Expr(op, lhs, rhs) => begin
-            if op in [:+=, :-=, :*=, :/=, :%=, :^=]
-                transform_augmented_assignment(op, lhs, rhs, dim_tracking)
-            else
-                Expr(op, map(e -> transform_ast(e, dim_tracking), [lhs, rhs])...)
-            end
-        end
-
         # Handle block expressions recursively
         Expr(:block, stmts...) => Expr(:block, map(e -> transform_ast(e, dim_tracking), stmts)...)
 
@@ -137,21 +127,6 @@ function transform_assignment(lhs, rhs, dim_tracking)
         else
             return Expr(:(=), lhs, transform_ast(rhs, dim_tracking))
         end
-    end
-end
-
-function transform_augmented_assignment(op, lhs, rhs, dim_tracking)
-    # Note: augmented assignment doesn't support destructuring in Julia
-    annotation = parse_size_annotation(lhs)
-    if annotation !== nothing
-        var_name, dims = annotation
-        check_expr = generate_size_check(var_name, dims, dim_tracking)
-        return Expr(:block,
-            Expr(op, lhs, transform_ast(rhs, dim_tracking)),
-            check_expr
-        )
-    else
-        return Expr(op, lhs, transform_ast(rhs, dim_tracking))
     end
 end
 
