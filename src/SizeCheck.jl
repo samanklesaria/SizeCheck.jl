@@ -167,6 +167,18 @@ end
 function generate_size_check(var_name, dims, dim_tracking)
     checks = []
 
+    # Check that the number of dimensions matches the number of annotations
+    n_annotations = length(dims)
+    first_dim = string(dims[1])
+    ndims_check = quote
+        let actual_ndims = ndims($var_name)
+            if actual_ndims != $n_annotations
+                error("Dimension $($first_dim) mismatch: variable $($(QuoteNode(var_name))) has $actual_ndims dimensions but expected $($n_annotations)")
+            end
+        end
+    end
+    push!(checks, ndims_check)
+
     for (i, dim) in enumerate(dims)
         if isdigit(dim)
             # Numerical constant - generate size check

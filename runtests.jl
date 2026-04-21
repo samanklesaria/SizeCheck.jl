@@ -339,7 +339,14 @@ end
     end
     @test_throws "explicitly provided" mixed_assignment_test(randn(3, 4))
 
-    # Test 8: Ensure normal dimension tracking still works after explicit assignment
+    # Test 8: Assigning a 2x3 matrix to value_D when D=5 should fail (shape mismatch)
+    @sizecheck function test_value_D_shape_mismatch()
+        value_D = randn(2, 3)  # Expects vector, given matrix
+        return value_D
+    end
+    @test_throws "Dimension D mismatch" test_value_D_shape_mismatch()
+
+    # Test 9: Ensure normal dimension tracking still works after explicit assignment
     @sizecheck function normal_after_explicit_test(x_N)
         M = 4
         y_M = randn(M)
